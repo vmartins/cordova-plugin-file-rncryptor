@@ -2,135 +2,195 @@ package at.lehklu.android;
 
 import org.cryptonode.jncryptor.*;
 
-import java.io.IOException;
-
-import org.apache.cordova.LOG;
 import org.apache.cordova.CordovaPlugin;
 import org.apache.cordova.CallbackContext;
-import org.apache.cordova.CordovaResourceApi;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 
+import java.util.Base64;
+import java.io.IOException;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.nio.channels.FileChannel;
-
 import java.nio.ByteBuffer;
-import java.util.Base64;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 
+import android.os.Build;
+import android.util.Log;
+
 /**
- * This class encrypts and decrypts files using the jncryptor lib
+ * This class encrypts and decrypts files using
+ * the jncryptor lib.
+ *
  */
-public class FileRNCryptor extends CordovaPlugin {
+public class FileRNCryptor extends CordovaPlugin
+{
+    private static final String TAG = "FileRNCryptor";
 
-  private static final String TAG = "FileRNCryptor";
-
-  public static final String ENCRYPT_ACTION = "encrypt";
-  public static final String DECRYPT_ACTION = "decrypt";
-  public static final String ENCRYPTTEXT_ACTION = "encryptText";
-  public static final String DECRYPTTEXT_ACTION = "decryptText";  
-
-  @Override
-  public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
-
-    if(action.equals(ENCRYPT_ACTION) || action.equals(DECRYPT_ACTION))
+    @Override
+    public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException
     {
-      final String path = args.getString(0);
-      final String pass = args.getString(1);
-  
-      this.cryptOp(path, pass, action, callbackContext);
-    }
-    else if(action.equals(ENCRYPTTEXT_ACTION) || action.equals(DECRYPTTEXT_ACTION))
-    {
-      final String text = args.getString(0);
-      final String pass = args.getString(1);
-  
-      this.cryptOpText(text, pass, action, callbackContext);
-    }
-    else
-    {
+        final String data = args.getString(0);
+        final String password = args.getString(1);
 
-      return false;
-      //<--
+        if (action.equals("encryptText")) {
+            this.encryptText(data, password, callbackContext);
+        } else if (action.equals("decryptText")) {
+            this.decryptText(data, password, callbackContext);
+        } else if (action.equals("encrypt")) {
+            this.encrypt(data, password, callbackContext);
+        } else if (action.equals("decrypt")) {
+            this.decrypt(data, password, callbackContext);
+        } else {
+            return false;
+        }
+
+        return true;
     }
 
+    /**
+     * Encrypt text
+     *
+     */
+    private void encryptText(String text, String password, CallbackContext callbackContext)
+    {
+        try {
+            JNCryptor cryptor = new AES256JNCryptor();
+            byte[] encryptData = cryptor.encryptData(text.getBytes(StandardCharsets.UTF_8), password.toCharArray());
+            String base64Encoded;
 
-    return true;
-  }
+            if (Build.VERSION.SDK_INT >= 26) {
+                base64Encoded = Base64.getEncoder().encodeToString(encryptData);
+            } else {
+                base64Encoded = android.util.Base64.encodeToString(encryptData, android.util.Base64.DEFAULT);
+            }
 
-  private void cryptOp(String path, String password, String action, CallbackContext callbackContext) {
+            callbackContext.success(base64Encoded);
+        } catch (SecurityException e) {
+            Log.d(TAG, "encryptText SecurityException: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        } catch (CryptorException e) {
+            Log.d(TAG, "encryptText CryptorException: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        }
+    }
 
-  	try
-  	{
-  		FileInputStream iStream=new FileInputStream(path);
-  		FileChannel iChannel=iStream.getChannel();
+    /**
+     * Decrypt text
+     *
+     */
+    private void decryptText(String text, String password, CallbackContext callbackContext)
+    {
+        try {
+            JNCryptor cryptor = new AES256JNCryptor();
 
-  		if(Integer.MAX_VALUE<iChannel.size())
-  		{
-      	LOG.d(TAG, "cryptoOp: file too large");
-      	callbackContext.error("cryptoOp: file too large");
-  			return;
-  			//<--
-  		}
+            byte[] base64Decoded;
+            if (Build.VERSION.SDK_INT >= 26) {
+                base64Decoded = Base64.getDecoder().decode(text);
+            } else {
+                base64Decoded = android.util.Base64.decode(text, android.util.Base64.DEFAULT);
+            }
 
+            byte[] decryptData = cryptor.decryptData(base64Decoded, password.toCharArray());
 
-  		ByteBuffer buffer=ByteBuffer.allocate((int)iChannel.size());
-  		iChannel.read(buffer);
-			byte[] data=buffer.array();
-			iStream.close();
+            callbackContext.success(new String(decryptData, StandardCharsets.UTF_8));
+        } catch (SecurityException e) {
+            Log.d(TAG, "decryptText SecurityException: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        } catch (CryptorException e) {
+            Log.d(TAG, "decryptText CryptorException: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        }
+    }
 
+    /**
+     * Encrypt
+     *
+     */
+    private void encrypt(String path, String password, CallbackContext callbackContext)
+    {
+        try {
+            FileInputStream iStream = new FileInputStream(path);
+            FileChannel iChannel = iStream.getChannel();
 
-			JNCryptor cryptor = new AES256JNCryptor();
+            if (Integer.MAX_VALUE<iChannel.size()) {
+                Log.d(TAG, "encrypt: file too large");
+                callbackContext.error("encrypt: file too large");
+                return;
+            }
 
-			byte[] cryptData=ENCRYPT_ACTION.equals(action)?
-				cryptor.encryptData(data, password.toCharArray()):
-				cryptor.decryptData(data, password.toCharArray());
+            ByteBuffer buffer = ByteBuffer.allocate((int) iChannel.size());
+            iChannel.read(buffer);
 
+            byte[] data = buffer.array();
+            iStream.close();
 
-			FileOutputStream oStream=new FileOutputStream(path);
-			FileChannel oChannel=oStream.getChannel();
-			oChannel.write(ByteBuffer.wrap(cryptData));
-			oStream.close();
+            JNCryptor cryptor = new AES256JNCryptor();
+            byte[] encryptData = cryptor.encryptData(data, password.toCharArray());
+            FileOutputStream oStream = new FileOutputStream(path);
+            FileChannel oChannel = oStream.getChannel();
+            oChannel.write(ByteBuffer.wrap(encryptData));
+            oStream.close();
 
-			callbackContext.success(path);
+            callbackContext.success(path);
+        } catch (IOException e) {
+            Log.d(TAG, "encrypt IOException: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        } catch (OutOfMemoryError e) {
+            Log.d(TAG, "encrypt OutOfMemoryError: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        } catch (SecurityException e) {
+            Log.d(TAG, "encrypt SecurityException: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        } catch (CryptorException e) {
+            Log.d(TAG, "encrypt CryptorException: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        }
+    }
 
-    } catch (IOException e) {
-      LOG.d(TAG, "cryptoOp IOException: " + e.getMessage());
-      callbackContext.error(e.getMessage());
-    } catch (OutOfMemoryError e) {
-      LOG.d(TAG, "cryptoOp OutOfMemoryError: " + e.getMessage());
-      callbackContext.error(e.getMessage());
-    } catch (SecurityException e) {
-      LOG.d(TAG, "cryptoOp SecurityException: " + e.getMessage());
-      callbackContext.error(e.getMessage());
-		} catch (CryptorException e) {
-      LOG.d(TAG, "cryptoOp CryptorException: " + e.getMessage());
-      callbackContext.error(e.getMessage());
-		}
-  }
+    /**
+     * Decrypt
+     *
+     */
+    private void decrypt(String path, String password, CallbackContext callbackContext)
+    {
+        try {
+            FileInputStream iStream = new FileInputStream(path);
+            FileChannel iChannel = iStream.getChannel();
 
-  private void cryptOpText(String text, String password, String action, CallbackContext callbackContext) {
+            if (Integer.MAX_VALUE<iChannel.size()) {
+                Log.d(TAG, "decrypt: file too large");
+                callbackContext.error("encrypt: file too large");
+                return;
+            }
 
-  	try
-  	{
-			JNCryptor cryptor = new AES256JNCryptor();
+            ByteBuffer buffer = ByteBuffer.allocate((int) iChannel.size());
+            iChannel.read(buffer);
 
-			byte[] cryptData=ENCRYPTTEXT_ACTION.equals(action)?
-				cryptor.encryptData(text.getBytes(StandardCharsets.UTF_8), password.toCharArray()):
-				cryptor.decryptData(Base64.getDecoder().decode(text), password.toCharArray());
+            byte[] data = buffer.array();
+            iStream.close();
 
-			callbackContext.success(ENCRYPTTEXT_ACTION.equals(action)?
-        Base64.getEncoder().encodeToString(cryptData):
-        new String(cryptData, StandardCharsets.UTF_8));
+            JNCryptor cryptor = new AES256JNCryptor();
+            byte[] decryptData = cryptor.decryptData(data, password.toCharArray());
+            FileOutputStream oStream = new FileOutputStream(path);
+            FileChannel oChannel = oStream.getChannel();
+            oChannel.write(ByteBuffer.wrap(decryptData));
+            oStream.close();
 
-    } catch (SecurityException e) {
-      LOG.d(TAG, "cryptoOp SecurityException: " + e.getMessage());
-      callbackContext.error(e.getMessage());
-		} catch (CryptorException e) {
-      LOG.d(TAG, "cryptoOp CryptorException: " + e.getMessage());
-      callbackContext.error(e.getMessage());
-		}
-  }  
+            callbackContext.success(path);
+        } catch (IOException e) {
+            Log.d(TAG, "decrypt IOException: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        } catch (OutOfMemoryError e) {
+            Log.d(TAG, "decrypt OutOfMemoryError: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        } catch (SecurityException e) {
+            Log.d(TAG, "decrypt SecurityException: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        } catch (CryptorException e) {
+            Log.d(TAG, "decrypt CryptorException: " + e.getMessage());
+            callbackContext.error(e.getMessage());
+        }
+    }
 }

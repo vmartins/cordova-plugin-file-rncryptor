@@ -17,7 +17,7 @@ $ cordova plugin add cordova-plugin-file-rncryptor
 
 or
 
-$ npm i git+https://github.com/lehklu/cordova-plugin-file-rncryptor
+$ npm i git+https://github.com/vmartins/cordova-plugin-file-rncryptor
 $ npx cap sync
 ```
 
